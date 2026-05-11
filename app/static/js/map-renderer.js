@@ -1502,6 +1502,14 @@ export class MapRenderer {
     if (this.zoom >= LABEL_RENDER_ZOOM_MIN && cell.b !== MR3.yardTypes.fortification) {
       this.drawLabel(cell, screenX, screenY);
     }
+
+    if (this.hasActiveBaseFilter() && this.isAlwaysVisibleOwnedBase(cell) && !this.matchesBaseFilter(cell)) {
+      this.ctx.save();
+      this.ctx.fillStyle = "rgba(0, 0, 0, 0.52)";
+      this.traceHexPath(screenX, screenY, FLOOR_HEX_VERTICES);
+      this.ctx.fill();
+      this.ctx.restore();
+    }
   }
 
   drawRelationshipOverlay(cell, screenX, screenY) {
@@ -1609,6 +1617,14 @@ export class MapRenderer {
       };
     }
 
+    if (this.hasActiveBaseFilter() && this.matchesBaseFilter(cell)) {
+      return {
+        fill: "rgba(255, 210, 50, 0.12)",
+        stroke: "rgba(255, 210, 50, 0.9)",
+        shadowBlur: 22,
+      };
+    }
+
     return null;
   }
 
@@ -1622,7 +1638,7 @@ export class MapRenderer {
     this.ctx.strokeStyle = style.stroke;
     this.ctx.lineWidth = Math.max(1.6, 2.4 * this.zoom);
     this.ctx.shadowColor = style.stroke;
-    this.ctx.shadowBlur = 8 * this.zoom;
+    this.ctx.shadowBlur = (style.shadowBlur || 8) * this.zoom;
     this.traceHexPath(screenX, screenY, FLOOR_HEX_VERTICES);
     this.ctx.fill();
     this.ctx.stroke();
