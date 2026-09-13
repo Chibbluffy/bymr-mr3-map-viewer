@@ -31,6 +31,15 @@ const MOBILE_DETAILS_RESIZE_TRANSITION_MS = 220;
 const INITIAL_OVERLAY_MESSAGE = "Loading...";
 const SIGNED_OUT_OVERLAY_MESSAGE = "Please log in.";
 
+// This viewer's sibling for the other map room version — linked when an
+// account's world doesn't match the one this viewer is built for.
+const OTHER_VIEWER_URL = "https://bymr-maproom2-viewer.chibbluffy.fyi/";
+const WRONG_MAP_VERSION_OVERLAY_MESSAGE = "This account is not on a Map Room 3 world.";
+const WRONG_MAP_VERSION_MESSAGE =
+  `${WRONG_MAP_VERSION_OVERLAY_MESSAGE} Please make sure it is on an ` +
+  `upgraded map room, or try the other map viewer: ` +
+  `<a href="${OTHER_VIEWER_URL}" target="_blank" rel="noopener">${OTHER_VIEWER_URL}</a>`;
+
 export class ViewerApp {
   constructor() {
     this.api = null;
@@ -432,6 +441,22 @@ export class ViewerApp {
       this.refreshCooldownUntil = 0;
       this.clearRefreshCooldownTimer();
       this.setSessionStatus("");
+
+      // bootstrap() has no way to tell the account is on the wrong map room
+      // version — initialPlayerCellData filters by map_version server-side,
+      // so a Map Room 2 account just gets an empty result set back, not an
+      // error. Check up front and point the player at the right viewer
+      // instead of silently rendering an empty map.
+      const wrongVersionMessage = await this.checkMapVersion();
+      if (wrongVersionMessage) {
+        this.setSessionStatus(wrongVersionMessage, true);
+        this.renderer?.reset(WRONG_MAP_VERSION_OVERLAY_MESSAGE);
+        this.setSearchEnabled(false, "");
+        this.setFilterEnabled(false);
+        this.renderDetails();
+        return;
+      }
+
       this.setSearchEnabled(false, "Loading full world map...");
       this.setFilterEnabled(false);
       await this.renderer.bootstrap(session);
@@ -450,6 +475,36 @@ export class ViewerApp {
     } finally {
       this.elements.loginButton.disabled = false;
     }
+  }
+
+  // Resolves the account's own worldid via /base/load, then cross-references
+  // it against the public world list to confirm it's actually a Map Room 3
+  // world. Returns an HTML message (with a link to the sibling viewer) if
+  // not, or null if everything checks out or the check itself couldn't be
+  // completed (in which case bootstrap() is left to fail on its own terms).
+  async checkMapVersion() {
+    const userid = this.session?.user?.userid;
+    if (!userid) return null;
+
+    let worldid = "";
+    try {
+      const save = await this.api.getOwnSave(this.session.token, userid);
+      worldid = save?.worldid || "";
+    } catch {
+      return null;
+    }
+
+    if (!worldid) return WRONG_MAP_VERSION_MESSAGE;
+
+    let worlds;
+    try {
+      ({ worlds } = await this.api.getWorlds());
+    } catch {
+      return null;
+    }
+
+    const world = (worlds || []).find((candidate) => candidate.uuid === worldid);
+    return world && world.map_version === 3 ? null : WRONG_MAP_VERSION_MESSAGE;
   }
 
   async handleLogin(event) {
@@ -2107,9 +2162,11 @@ export class ViewerApp {
     this.renderer.focusCell(entry.cell, { animate: true, resetZoom: true });
   }
 
+  // innerHTML rather than textContent so WRONG_MAP_VERSION_MESSAGE's link can
+  // render — every caller passes a static, trusted string, never user input.
   setSessionStatus(message, isError = false) {
     this.elements.sessionStatus.hidden = !message;
-    this.elements.sessionStatus.textContent = message;
+    this.elements.sessionStatus.innerHTML = message;
     this.elements.sessionStatus.style.color = isError ? "#ffb59f" : "";
   }
 

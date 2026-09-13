@@ -98,6 +98,24 @@ export class ApiClient {
     return fetchJson(this.buildApiUrl("/worlds"));
   }
 
+  // Neither /player/getinfo nor /bm/getnewmap expose the player's worldid, so
+  // this is the only client-callable source of it: the same /base/load call
+  // (type=build, baseid=DEFAULT) the real game client makes on first login.
+  // It also runs the game's own one-time login side effects (Town Hall reward
+  // grants, invasion wave rollover) — harmless/idempotent, same reasoning as
+  // the MR2 viewer's equivalent call. Returns the player's full filtered
+  // save, worldid included. Used by ViewerApp.checkMapVersion().
+  async getOwnSave(token, userid) {
+    return fetchJson(buildBymUrl("/base/load", null, this.config), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+      },
+      body: new URLSearchParams({ type: "build", userid: String(userid), baseid: "0", mapversion: "3" }),
+    });
+  }
+
   async getLeaderboard(worldId, mapVersion = 3) {
     return fetchJson(this.buildApiUrl("/leaderboards", {
       worldid: worldId,
