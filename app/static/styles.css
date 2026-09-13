@@ -221,8 +221,7 @@ body {
     rgba(14, 12, 10, 0.26);
 }
 
-.map-overlay::after {
-  content: attr(data-message);
+.map-overlay-message {
   position: relative;
   display: block;
   width: min(640px, 100%);
@@ -231,6 +230,12 @@ body {
   background: rgba(56, 56, 56, 0.82);
   border: 1px solid rgba(255, 255, 255, 0.16);
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.38);
+}
+
+.map-overlay-message a {
+  color: #7fd8ff;
+  text-decoration: underline;
+  word-break: break-all;
 }
 
 .map-coordinates {

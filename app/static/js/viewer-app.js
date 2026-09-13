@@ -449,8 +449,13 @@ export class ViewerApp {
       // instead of silently rendering an empty map.
       const wrongVersionMessage = await this.checkMapVersion();
       if (wrongVersionMessage) {
-        this.setSessionStatus(wrongVersionMessage, true);
-        this.renderer?.reset(WRONG_MAP_VERSION_OVERLAY_MESSAGE);
+        // #session-status is CSS-hidden once .signed-in is set (it's meant
+        // for pre-login status only), so the link-carrying message has to go
+        // on the map overlay instead — that's the only thing still visible
+        // in the signed-in state. Still set the plain text on sessionStatus
+        // too, harmless and correct if that CSS ever changes.
+        this.setSessionStatus(WRONG_MAP_VERSION_OVERLAY_MESSAGE, true);
+        this.renderer?.reset(wrongVersionMessage);
         this.setSearchEnabled(false, "");
         this.setFilterEnabled(false);
         this.renderDetails();

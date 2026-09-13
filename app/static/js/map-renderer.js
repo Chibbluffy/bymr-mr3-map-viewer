@@ -455,9 +455,12 @@ export class MapRenderer {
     this.setZoom(this.zoom * multiplier, focusX, focusY);
   }
 
+  // innerHTML rather than textContent so a message can carry a real link
+  // (e.g. ViewerApp.checkMapVersion()'s wrong-map-room message) — every
+  // caller passes a static, trusted string, never user input.
   setOverlay(message) {
-    this.overlayEl.dataset.message = message || "";
-    this.overlayEl.textContent = "";
+    const messageEl = this.overlayEl.querySelector("#map-overlay-message");
+    if (messageEl) messageEl.innerHTML = message || "";
     this.overlayEl.hidden = !message;
   }
 
