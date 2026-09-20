@@ -848,6 +848,24 @@ h2 {
   padding: 9px 12px;
 }
 
+.map-data-as-of {
+  position: absolute;
+  right: 18px;
+  bottom: 74px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(14, 12, 10, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  z-index: 3;
+}
+
+.map-data-as-of[hidden] {
+  display: none !important;
+}
+
 .map-controls {
   position: absolute;
   right: 18px;

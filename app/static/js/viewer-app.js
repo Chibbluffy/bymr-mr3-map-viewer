@@ -15,6 +15,7 @@ import {
   escapeHtml,
   formatDistance,
   formatNumber,
+  formatRelativeTime,
   getLocalViewerConfig,
   hasActiveBaseFilterState,
   normalizeApiVersion,
@@ -93,6 +94,7 @@ export class ViewerApp {
       mapCanvas: document.getElementById("map-canvas"),
       mapCoordinates: document.getElementById("map-coordinates"),
       mapOverlay: document.getElementById("map-overlay"),
+      mapDataAsOf: document.getElementById("map-data-as-of"),
       searchToggleButton: document.getElementById("search-toggle-button"),
       searchPanel: document.getElementById("search-panel"),
       searchInput: document.getElementById("search-input"),
@@ -150,6 +152,9 @@ export class ViewerApp {
     this.elements.findHomeButton.addEventListener("click", () => this.renderer.focusHome());
     this.elements.zoomInButton.addEventListener("click", () => this.renderer.zoomBy(1.18, true));
     this.elements.zoomOutButton.addEventListener("click", () => this.renderer.zoomBy(1 / 1.18, true));
+
+    // Keeps "Map data as of Xm ago" ticking forward without requiring a refresh.
+    window.setInterval(() => this.updateMapDataAsOfDisplay(), 30_000);
 
     this.elements.sessionTriggerButton.addEventListener("click", () => this.toggleSessionPopover());
     this.elements.worldsToggleButton.addEventListener("click", () => this.openWorldsModal());
@@ -448,6 +453,7 @@ export class ViewerApp {
       this.rebuildSearchIndex();
       this.rebuildFilterOptions();
       this.updateRefreshButtonState();
+      this.updateMapDataAsOfDisplay();
       this.setSearchEnabled(
         true,
         this.searchEntries.length
@@ -546,6 +552,7 @@ export class ViewerApp {
       this.rebuildSearchIndex();
       this.rebuildFilterOptions(true);
       this.renderDetails();
+      this.updateMapDataAsOfDisplay();
       this.startRefreshCooldown();
     } catch (error) {
       console.error(error);
@@ -1785,6 +1792,7 @@ export class ViewerApp {
     this.selectedCell = null;
     this.hoveredCell = null;
     this.renderer?.reset(INITIAL_OVERLAY_MESSAGE);
+    this.updateMapDataAsOfDisplay();
     this.renderDetails();
   }
 
@@ -1805,6 +1813,28 @@ export class ViewerApp {
     this.selectedCell = null;
     this.hoveredCell = null;
     this.renderer?.reset(SIGNED_OUT_OVERLAY_MESSAGE);
+    this.updateMapDataAsOfDisplay();
     this.renderDetails();
+  }
+
+  // Cached full-map data can be considerably older than "now" (restored from
+  // IndexedDB rather than freshly fetched) — shown near the refresh button so
+  // that's visible instead of silently invisible. Also called on a timer so
+  // "4m ago" keeps ticking forward without requiring a refresh/relogin.
+  updateMapDataAsOfDisplay() {
+    const el = this.elements.mapDataAsOf;
+    if (!el) {
+      return;
+    }
+
+    const asOf = this.renderer?.getFullMapDataAsOf() ?? null;
+    const relative = formatRelativeTime(asOf);
+    if (!relative) {
+      el.hidden = true;
+      return;
+    }
+
+    el.textContent = `Map data as of ${relative}`;
+    el.hidden = false;
   }
 }

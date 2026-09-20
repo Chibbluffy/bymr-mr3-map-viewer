@@ -17,6 +17,10 @@ BYM MR Viewer is a browser-based Map Room 3 viewer for Backyard Monsters Refitte
 
 The viewer runs entirely in your browser. After you choose a server, it connects directly to that BYM server for sign-in, world data, leaderboards, and map data. Map graphics are loaded from the selected server's CDN.
 
+Every network request (API calls and CDN asset loads alike) has a timeout, so a stalled connection — a dropped mobile network, a flaky proxy, a server that accepts the connection but never replies — fails with a clear message instead of hanging forever with no error ever surfacing. Single requests (login, session refresh, the map-version check, individual CDN assets) time out after 8 seconds; the ~60 chunked requests of a full-map preload get 20 seconds each, since a bigger payload legitimately needs more room. A bad token or dead connection surfaces almost immediately, since that check always happens before the slower full-map load starts.
+
+Once a world's full map has loaded once, it's cached locally (IndexedDB) so the next sign-in doesn't have to re-fetch it — but that means what's on screen right after loading can be from that cache rather than freshly fetched. A small "Map data as of Xm ago" label near the refresh button shows how old it actually is; hit refresh to get current data.
+
 ## Interface
 
 Everything lives in a top bar plus floating controls over the map — there's no collapsible side panel:

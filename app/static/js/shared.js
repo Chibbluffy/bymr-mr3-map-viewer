@@ -164,12 +164,32 @@ export const FORTIFICATION_DIRECTIONS = [
 
 
 
-export async function fetchJson(url, options = {}) {
+// Every request goes through here (or, for the two exceptions that can't use this
+// helper directly, applies the same pattern by hand) — with no timeout, a single
+// connection that stalls (a dropped mobile network, a flaky proxy, a server that
+// accepts the connection but never replies) hangs its fetch() promise forever with
+// no error ever thrown. Two tiers: SHORT for single small requests — login, session
+// refresh, the map-version check, the initial getMapInit call — so a bad token or a
+// dead connection surfaces in seconds instead of looking like a hang; LONG for the
+// ~60 chunked requests of a full-map preload spread across 8 concurrent workers,
+// which legitimately need a bit more room per request.
+export const FETCH_TIMEOUT_SHORT_MS = 8_000;
+export const FETCH_TIMEOUT_LONG_MS = 20_000;
+
+export async function fetchJson(url, options = {}, timeoutMs = FETCH_TIMEOUT_SHORT_MS) {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+
   let response;
   try {
-    response = await fetch(url, options);
+    response = await fetch(url, { ...options, signal: controller.signal });
   } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("BYM server took too long to respond — please try again.");
+    }
     throw new Error(error?.message ? `Unable to reach BYM server: ${error.message}` : "Unable to reach BYM server.");
+  } finally {
+    globalThis.clearTimeout(timeoutId);
   }
 
   const rawBody = await response.text();
@@ -581,6 +601,21 @@ export function formatDistance(value) {
   }
 
   return `${formatNumber(Number(value))} cell${Number(value) === 1 ? "" : "s"} away`;
+}
+
+// "just now" / "4m ago" / "3h ago" / "2d ago" — for showing how stale cached map
+// data is, since it can be served straight from the local IndexedDB cache instead
+// of a fresh fetch.
+export function formatRelativeTime(unixMs) {
+  if (!unixMs) {
+    return null;
+  }
+
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - unixMs) / 1000));
+  if (diffSeconds < 60) return "just now";
+  if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}m ago`;
+  if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)}h ago`;
+  return `${Math.floor(diffSeconds / 86400)}d ago`;
 }
 
 export function describeYardType(cell) {

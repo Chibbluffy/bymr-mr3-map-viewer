@@ -70,6 +70,10 @@ export class MapRenderer {
     this.fullMapLoaded = false;
     this.fullMapPreloading = false;
     this.fullMapCacheKey = null;
+    // When the currently-loaded full map data actually reflects — Date.now() for a
+    // fresh network preload, the cache's own savedAt when restored from IndexedDB
+    // (which can be considerably older). Null until a full map load completes once.
+    this.fullMapDataAsOf = null;
     this.baseFilter = createEmptyRendererBaseFilter();
     this.dragging = false;
     this.dragMoved = false;
@@ -101,6 +105,7 @@ export class MapRenderer {
     this.cellCache.clear();
     this.fullMapLoaded = false;
     this.fullMapPreloading = false;
+    this.fullMapDataAsOf = null;
     this.fullMapCacheKey = buildFullMapCacheKey(this.currentUserId, this.mapMeta, this.api?.config?.bymBaseUrl);
     this.homeCellKey = null;
     this.hoveredCellKey = null;
@@ -148,12 +153,14 @@ export class MapRenderer {
       offsetY: this.offsetY,
       zoom: this.zoom,
       fullMapLoaded: this.fullMapLoaded,
+      fullMapDataAsOf: this.fullMapDataAsOf,
     };
 
     try {
       this.cancelAnimations();
       this.fullMapLoaded = false;
       this.fullMapPreloading = false;
+      this.fullMapDataAsOf = null;
       this.cellCache.clear();
       this.setOverlay("Refreshing live MR3 data...");
       this.setCoordinatesDisplay(null);
@@ -196,6 +203,7 @@ export class MapRenderer {
       this.offsetY = snapshot.offsetY;
       this.zoom = snapshot.zoom;
       this.fullMapLoaded = snapshot.fullMapLoaded;
+      this.fullMapDataAsOf = snapshot.fullMapDataAsOf;
       this.fullMapPreloading = false;
       this.onHoverCell(this.hoveredCellKey ? this.cellCache.get(this.hoveredCellKey) || null : null);
       this.onSelectCell(this.getSelectedCell());
@@ -222,6 +230,7 @@ export class MapRenderer {
     this.pendingFetch = false;
     this.fullMapLoaded = false;
     this.fullMapPreloading = false;
+    this.fullMapDataAsOf = null;
     if (this.fetchTimer) {
       window.clearTimeout(this.fetchTimer);
       this.fetchTimer = null;
@@ -243,6 +252,10 @@ export class MapRenderer {
 
   getSelectedCell() {
     return this.selectedCellKey ? this.cellCache.get(this.selectedCellKey) || null : null;
+  }
+
+  getFullMapDataAsOf() {
+    return this.fullMapLoaded ? this.fullMapDataAsOf : null;
   }
 
   setBaseFilter(filter) {
@@ -732,6 +745,7 @@ export class MapRenderer {
       this.mergeCells(chunk);
     }
 
+    this.fullMapDataAsOf = Number(metadata.savedAt) || Date.now();
     return true;
   }
 
@@ -777,8 +791,14 @@ export class MapRenderer {
 
     this.setOverlay(`${progressLabel} (0%)...`);
 
+    // If one worker's request fails, the others should stop claiming new chunks
+    // rather than keep running in the background after preloadEntireMap() has
+    // already rejected and the caller has moved on (possibly resetting/reusing
+    // this.cellCache for a fresh session) — they'd otherwise still be merging
+    // cells into it well after the fact.
+    let cancelled = false;
     const runWorker = async () => {
-      while (nextChunkIndex < totalChunks) {
+      while (!cancelled && nextChunkIndex < totalChunks) {
         const chunkIndex = nextChunkIndex;
         nextChunkIndex += 1;
         const startCellId = chunkIndex * chunkSize + 1;
@@ -789,7 +809,13 @@ export class MapRenderer {
           cellIds.push(cellId);
         }
 
-        const response = await this.api.getMapCells(this.token, cellIds);
+        let response;
+        try {
+          response = await this.api.getMapCells(this.token, cellIds);
+        } catch (error) {
+          cancelled = true;
+          throw error;
+        }
         this.mergeCells(response.celldata || []);
         completedCells += cellIds.length;
         completedChunks += 1;
@@ -809,6 +835,7 @@ export class MapRenderer {
       const workers = Array.from({ length: workerCount }, () => runWorker());
       await Promise.all(workers);
       this.fullMapLoaded = true;
+      this.fullMapDataAsOf = Date.now();
       this.persistFullMapCache().catch((error) => {
         console.warn("Failed to persist the full-map session cache.", error);
       });

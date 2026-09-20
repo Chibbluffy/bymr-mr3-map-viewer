@@ -1,4 +1,4 @@
-﻿import { ASSET_PATHS, TILE_DEFINITIONS } from "./shared.js";
+﻿import { ASSET_PATHS, FETCH_TIMEOUT_SHORT_MS, TILE_DEFINITIONS } from "./shared.js";
 export class AssetCache {
   constructor(config) {
     this.config = config;
@@ -27,10 +27,24 @@ export class AssetCache {
 
   async loadImage(path) {
     return new Promise((resolve) => {
+      let settled = false;
+      const settle = (result) => {
+        if (settled) return;
+        settled = true;
+        globalThis.clearTimeout(timeoutId);
+        resolve(result);
+      };
+
+      // preload() runs one of these per asset inside Promise.all() — a request
+      // that never fires onload or onerror (a stalled connection, same failure
+      // mode as fetchJson()'s timeout) would otherwise hang the entire CDN
+      // asset preload forever, on every app load, not just login.
+      const timeoutId = globalThis.setTimeout(() => settle(null), FETCH_TIMEOUT_SHORT_MS);
+
       const image = new Image();
       image.decoding = "async";
-      image.onload = () => resolve(image);
-      image.onerror = () => resolve(null);
+      image.onload = () => settle(image);
+      image.onerror = () => settle(null);
       image.src = this.urlFor(path);
     });
   }
