@@ -17,6 +17,16 @@ BYM MR Viewer is a browser-based Map Room 3 viewer for Backyard Monsters Refitte
 
 The viewer runs entirely in your browser. After you choose a server, it connects directly to that BYM server for sign-in, world data, leaderboards, and map data. Map graphics are loaded from the selected server's CDN.
 
+## Interface
+
+Everything lives in a top bar plus floating controls over the map — there's no collapsible side panel:
+
+- **Sign in** (top bar, right) opens a popover with the server picker and login/logout — the one control that's always reachable, since a server switch or login can happen at any time.
+- **Leaderboards** (top bar, left) opens a popup with the MR3 world list and leaderboards, defaulting to your own account's current world once you're signed in. This is stats only — picking a different world here does not change which world's map you're viewing. The API only ever returns cell data for your logged-in account's current world.
+- **Search** and **Filters** (floating buttons over the map, top-right) open in place, side by side if both are open. Search jumps to a player's base; filters highlight bases by type, tribe, level, or owner.
+- Cell details appear in a floating panel (top-left) on hover, and stay pinned with a close button once you click a cell.
+- Refresh, find home, and zoom stay as floating controls bottom-right. Refresh has a 60-second cooldown, shown as a badge on the button.
+
 ## Credentials and Privacy
 
 Your BYM email and password are only sent to the server you choose in the viewer:

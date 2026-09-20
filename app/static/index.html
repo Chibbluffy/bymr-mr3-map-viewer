@@ -14,312 +14,293 @@
     <div id="app">
       <main class="map-shell">
         <section id="map-panel" class="map-panel panel">
-          <canvas id="map-canvas"></canvas>
-          <aside class="sidebar">
-            <div class="panel brand-panel">
-              <p class="eyebrow">Backyard Monsters Refitted</p>
-              <h1>Map Room 3 Viewer</h1>
-              <p class="muted">
-                A browser-based Map Room 3 viewer for Backyard Monsters.
-              </p>
-            </div>
 
-            <div class="panel server-panel">
-              <p class="eyebrow">Server</p>
-              <select id="server-select" class="server-select">
-                <option value="stable">Stable</option>
-                <option value="local">Local</option>
-                <option value="custom">Custom</option>
-              </select>
-              <div id="server-custom-fields" class="server-custom-fields" hidden>
-                <label class="server-custom-field server-custom-url" for="server-host-input">
-                  <span>IP / URL</span>
-                  <input id="server-host-input" type="text" placeholder="127.0.0.1">
-                </label>
-                <label class="server-custom-field server-custom-port" for="server-port-input">
-                  <span>Port</span>
-                  <input id="server-port-input" type="number" min="1" max="65535" inputmode="numeric" value="3001">
-                </label>
-              </div>
-            </div>
+          <!-- Top bar — brand, world/leaderboard stats, session (all pinned) -->
+          <header class="top-bar">
+            <div class="top-bar-brand"><strong>BYM</strong> Map Room 3 Viewer</div>
 
-            <div class="panel session-panel">
-              <div class="session-header">
-                <div>
-                  <p class="eyebrow">Session</p>
-                  <h2 id="session-name">Signed out</h2>
+            <button
+              id="worlds-toggle-button"
+              class="secondary-button"
+              type="button"
+              title="Leaderboards — stats for any MR3 world (view-only, doesn't change your map)"
+            >
+              Leaderboards
+            </button>
+
+            <div class="top-bar-spacer"></div>
+
+            <div class="top-bar-field top-bar-session">
+              <button
+                id="session-trigger-button"
+                class="session-trigger-button"
+                type="button"
+                aria-expanded="false"
+                aria-haspopup="true"
+              >
+                <span id="session-trigger-label">Sign in</span>
+                <svg class="session-trigger-caret" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 10l5 5 5-5z" />
+                </svg>
+              </button>
+
+              <div id="session-popover" class="session-popover panel" hidden>
+                <div class="server-panel">
+                  <p class="eyebrow">Server</p>
+                  <select id="server-select" class="server-select">
+                    <option value="stable">Stable</option>
+                    <option value="local">Local</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                  <div id="server-custom-fields" class="server-custom-fields" hidden>
+                    <label class="server-custom-field server-custom-url" for="server-host-input">
+                      <span>IP / URL</span>
+                      <input id="server-host-input" type="text" placeholder="127.0.0.1">
+                    </label>
+                    <label class="server-custom-field server-custom-port" for="server-port-input">
+                      <span>Port</span>
+                      <input id="server-port-input" type="number" min="1" max="65535" inputmode="numeric" value="3001">
+                    </label>
+                  </div>
                 </div>
-                <button id="logout-button" class="secondary-button" type="button" hidden>Log out</button>
+
+                <div class="session-header">
+                  <div>
+                    <p class="eyebrow">Session</p>
+                    <h2 id="session-name">Signed out</h2>
+                  </div>
+                  <button id="logout-button" class="secondary-button" type="button" hidden>Log out</button>
+                </div>
+
+                <form id="login-form" class="login-form">
+                  <label>
+                    <span>Email</span>
+                    <input id="email-input" name="email" type="email" autocomplete="username" required>
+                  </label>
+                  <label>
+                    <span>Password</span>
+                    <input id="password-input" name="password" type="password" autocomplete="current-password" required>
+                  </label>
+                  <button id="login-button" class="primary-button" type="submit">Sign in</button>
+                </form>
+
+                <p id="session-status" class="muted">Sign in with your own BYM credentials.</p>
               </div>
-
-              <form id="login-form" class="login-form">
-                <label>
-                  <span>Email</span>
-                  <input id="email-input" name="email" type="email" autocomplete="username" required>
-                </label>
-                <label>
-                  <span>Password</span>
-                  <input id="password-input" name="password" type="password" autocomplete="current-password" required>
-                </label>
-                <button id="login-button" class="primary-button" type="submit">Sign in</button>
-              </form>
-
-              <p id="session-status" class="muted">Sign in with your own BYM credentials.</p>
             </div>
+          </header>
 
-            <div class="panel details-panel">
-              <p class="eyebrow">Cell</p>
-              <h2 id="details-title">No selection</h2>
+          <div class="map-surface">
+            <canvas id="map-canvas"></canvas>
+
+            <!-- Floating cell-detail panel — hover previews, click pins it open -->
+            <div id="cell-detail-panel" class="cell-detail-panel panel" hidden>
+              <div class="cell-detail-header">
+                <h2 id="details-title">No selection</h2>
+                <button id="details-close-button" class="cell-detail-close" type="button" aria-label="Close" title="Close">×</button>
+              </div>
               <div id="details-content" class="details-content">
                 Hover or select a visible MR3 cell to inspect it.
               </div>
             </div>
 
-            <div class="panel">
-              <p class="eyebrow">Worlds</p>
-              <h2>MR3 Worlds</h2>
-              <p class="notice">
-                The current BYM API only exposes MR3 cells for the authenticated player's current world.
-                Selecting a world updates metadata and leaderboards only.
-              </p>
-              <div id="world-list" class="world-list"></div>
-            </div>
-
-            <div class="panel leaderboard-panel">
-              <p class="eyebrow">Leaderboard</p>
-              <h2 id="leaderboard-title">No world selected</h2>
-              <div id="leaderboard-list" class="leaderboard-list"></div>
-            </div>
-
-            <div class="panel credits-panel">
-              <p class="muted credits-copy">
-                Made with &lt;3 by sparkey and GPT-5.4 For issues &amp; bug reports, please use the
-                <a
-                  class="credits-link"
-                  href="https://github.com/PsychoTea/bym-mr-viewer/issues"
-                  target="_blank"
-                  rel="noreferrer"
-                >GitHub tracker</a>.
-              </p>
-            </div>
-          </aside>
-
-          <button
-            id="sidebar-toggle-button"
-            class="sidebar-toggle-button"
-            type="button"
-            aria-label="Hide sidebar"
-            aria-expanded="true"
-            title="Hide sidebar"
-            hidden
-          >
-            <svg class="sidebar-toggle-icon sidebar-toggle-icon-desktop" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M15.5 4.5 8 12l7.5 7.5-2.1 2.1L3.8 12l9.6-9.6 2.1 2.1Z" />
-            </svg>
-            <svg class="sidebar-toggle-icon sidebar-toggle-icon-mobile" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 7h16v2H4zM4 11h16v2H4zM4 15h16v2H4z" />
-            </svg>
-            <svg class="sidebar-toggle-icon sidebar-toggle-icon-close" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4 6.4 5Z" />
-            </svg>
-          </button>
-          <div class="map-tool-bar">
-            <div class="map-search-panel" aria-label="Map search">
-              <button
-                id="search-toggle-button"
-                class="icon-button map-tool-toggle-button"
-                type="button"
-                aria-label="Open search"
-                aria-expanded="false"
-                title="Search"
-                disabled
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Zm6.86 10.44L21 20.08 19.58 21.5l-3.64-3.64 1.42-1.42Z" />
-                </svg>
-              </button>
-              <div class="map-search-content">
-                <p class="eyebrow">Search</p>
-                <div class="search-shell">
-                  <input
-                    id="search-input"
-                    class="search-input"
-                    type="search"
-                    placeholder="Search by username"
-                    autocomplete="off"
-                    spellcheck="false"
-                    disabled
-                  >
-                  <div id="search-results" class="search-results" hidden></div>
-                </div>
+            <!-- Search + Filter toolbar, floating over the map -->
+            <div class="map-tool-bar">
+              <div class="map-tool-buttons">
+                <button
+                  id="search-toggle-button"
+                  class="icon-button"
+                  type="button"
+                  aria-label="Open search"
+                  aria-expanded="false"
+                  title="Search players"
+                  disabled
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Zm6.86 10.44L21 20.08 19.58 21.5l-3.64-3.64 1.42-1.42Z" />
+                  </svg>
+                </button>
+                <button
+                  id="filter-toggle-button"
+                  class="secondary-button tool-toggle-button"
+                  type="button"
+                  aria-label="Show filters"
+                  aria-expanded="false"
+                  disabled
+                >
+                  <svg class="filter-toggle-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 6h16l-6 7v5l-4 2v-7L4 6Z" />
+                  </svg>
+                  <span id="filter-toggle-label" class="filter-toggle-label">Show Filters</span>
+                </button>
               </div>
-            </div>
 
-            <div class="map-filter-anchor" aria-label="Map filters">
-              <p class="eyebrow">Base Filters</p>
-              <button
-                id="filter-toggle-button"
-                class="secondary-button tool-toggle-button"
-                type="button"
-                aria-label="Show filters"
-                aria-expanded="false"
-                disabled
-              >
-                <svg class="filter-toggle-icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 6h16l-6 7v5l-4 2v-7L4 6Z" />
-                </svg>
-                <span id="filter-toggle-label" class="filter-toggle-label">Show Filters</span>
-              </button>
-              <div id="filter-menu" class="filter-menu" hidden>
-                <div class="filter-menu-header">
-                  <div>
-                    <p class="eyebrow">Filter</p>
-                    <h2>Base Filters</h2>
-                  </div>
-                  <button id="filter-clear-button" class="secondary-button" type="button">Clear</button>
-                </div>
-                <div class="filter-section">
-                  <p class="filter-section-title">Player</p>
-                  <div class="search-shell filter-player-shell">
+              <div class="map-panels-row">
+                <div id="search-panel" class="map-tool-panel" hidden>
+                  <p class="eyebrow">Search</p>
+                  <div class="search-shell">
                     <input
-                      id="filter-player-input"
-                      class="search-input filter-player-input"
+                      id="search-input"
+                      class="search-input"
                       type="search"
-                      placeholder="Filter by username"
+                      placeholder="Search by username"
                       autocomplete="off"
                       spellcheck="false"
+                      disabled
                     >
-                    <div id="filter-player-results" class="search-results filter-player-results" hidden></div>
+                    <div id="search-results" class="search-results" hidden></div>
                   </div>
-                  <p class="filter-help">
-                    Show a player&apos;s main yard and owned outposts, including fortifications.
-                  </p>
+                  <p id="search-status" class="muted"></p>
                 </div>
-                <div class="filter-section">
-                  <p class="filter-section-title">Type</p>
-                  <div id="filter-type-options" class="filter-options"></div>
-                </div>
-                <div class="filter-section">
-                  <p class="filter-section-title">Tribe</p>
-                  <div id="filter-tribe-options" class="filter-options"></div>
-                </div>
-                <div class="filter-section">
-                  <p class="filter-section-title">Level</p>
-                  <div id="filter-level-range" class="filter-level-range">
-                    <div class="filter-level-range-values">
-                      <span id="filter-level-min-label" class="filter-level-range-value">Min -</span>
-                      <span id="filter-level-max-label" class="filter-level-range-value">Max -</span>
+
+                <div id="filter-menu" class="map-tool-panel" hidden>
+                  <div class="filter-menu-header">
+                    <div>
+                      <p class="eyebrow">Filter</p>
+                      <h2>Base Filters</h2>
                     </div>
-                    <div class="filter-level-range-track">
-                      <div id="filter-level-range-fill" class="filter-level-range-fill"></div>
-                      <input
-                        id="filter-level-min-input"
-                        class="filter-level-slider"
-                        type="range"
-                        min="0"
-                        max="0"
-                        step="1"
-                        value="0"
-                        data-bound="min"
-                      >
-                      <input
-                        id="filter-level-max-input"
-                        class="filter-level-slider"
-                        type="range"
-                        min="0"
-                        max="0"
-                        step="1"
-                        value="0"
-                        data-bound="max"
-                      >
-                    </div>
+                    <button id="filter-clear-button" class="secondary-button" type="button">Clear</button>
                   </div>
-                  <p id="filter-level-help" class="filter-help">No wild base levels available.</p>
-                </div>
-                <div class="filter-menu-footer">
-                  <p id="filter-match-count" class="filter-match-count">0 bases shown</p>
+                  <div class="filter-section">
+                    <p class="filter-section-title">Player</p>
+                    <div class="search-shell filter-player-shell">
+                      <input
+                        id="filter-player-input"
+                        class="search-input filter-player-input"
+                        type="search"
+                        placeholder="Filter by username"
+                        autocomplete="off"
+                        spellcheck="false"
+                      >
+                      <div id="filter-player-results" class="search-results filter-player-results" hidden></div>
+                    </div>
+                    <p class="filter-help">
+                      Show a player&apos;s main yard and owned outposts, including fortifications.
+                    </p>
+                  </div>
+                  <div class="filter-section">
+                    <p class="filter-section-title">Type</p>
+                    <div id="filter-type-options" class="filter-options"></div>
+                  </div>
+                  <div class="filter-section">
+                    <p class="filter-section-title">Tribe</p>
+                    <div id="filter-tribe-options" class="filter-options"></div>
+                  </div>
+                  <div class="filter-section">
+                    <p class="filter-section-title">Level</p>
+                    <div id="filter-level-range" class="filter-level-range">
+                      <div class="filter-level-range-values">
+                        <span id="filter-level-min-label" class="filter-level-range-value">Min -</span>
+                        <span id="filter-level-max-label" class="filter-level-range-value">Max -</span>
+                      </div>
+                      <div class="filter-level-range-track">
+                        <div id="filter-level-range-fill" class="filter-level-range-fill"></div>
+                        <input
+                          id="filter-level-min-input"
+                          class="filter-level-slider"
+                          type="range"
+                          min="0"
+                          max="0"
+                          step="1"
+                          value="0"
+                          data-bound="min"
+                        >
+                        <input
+                          id="filter-level-max-input"
+                          class="filter-level-slider"
+                          type="range"
+                          min="0"
+                          max="0"
+                          step="1"
+                          value="0"
+                          data-bound="max"
+                        >
+                      </div>
+                    </div>
+                    <p id="filter-level-help" class="filter-help">No wild base levels available.</p>
+                  </div>
+                  <div class="filter-menu-footer">
+                    <p id="filter-match-count" class="filter-match-count">0 bases shown</p>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          <div id="map-coordinates" class="map-coordinates" hidden>Cell -, -</div>
-          <div
-            id="map-overlay"
-            class="map-overlay"
-          ><div id="map-overlay-message" class="map-overlay-message">Loading...</div></div>
-          <div
-            id="mobile-details-sheet"
-            class="panel mobile-details-sheet"
-            aria-hidden="true"
-          >
-            <div class="mobile-details-sheet-header">
-              <div>
-                <p class="eyebrow">Cell</p>
-                <h2 id="mobile-details-title">No selection</h2>
-              </div>
+
+            <div id="map-coordinates" class="map-coordinates" hidden>Cell -, -</div>
+            <div
+              id="map-overlay"
+              class="map-overlay"
+            ><div id="map-overlay-message" class="map-overlay-message">Loading...</div></div>
+
+            <div class="map-controls" aria-label="Map controls">
               <button
-                id="mobile-details-close-button"
-                class="icon-button mobile-details-close-button"
+                id="refresh-button"
+                class="icon-button map-control-button"
                 type="button"
-                aria-label="Close cell information"
-                title="Close cell information"
+                aria-label="Refresh world map"
+                title="Refresh world map"
+                data-tooltip="Refresh map"
+                disabled
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4 6.4 5Z" />
+                  <path d="M12 5a7 7 0 1 1-6.65 9.18 1 1 0 1 1 1.9-.62A5 5 0 1 0 8 8.58V11a1 1 0 0 1-1.7.71l-3-3a1 1 0 0 1 0-1.42l3-3A1 1 0 0 1 8 5v1.46A6.96 6.96 0 0 1 12 5Z" />
+                </svg>
+                <span id="refresh-button-cooldown" class="map-control-cooldown" aria-hidden="true" hidden></span>
+              </button>
+              <button
+                id="find-home-button"
+                class="icon-button map-control-button"
+                type="button"
+                aria-label="Find home base"
+                title="Find home base"
+                data-tooltip="Find home base"
+                disabled
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3 3 10.5V21h6v-5h6v5h6V10.5L12 3Z" />
                 </svg>
               </button>
+              <button
+                id="zoom-out-button"
+                class="icon-button map-control-button"
+                type="button"
+                aria-label="Zoom out"
+                title="Zoom out"
+                data-tooltip="Zoom out"
+              >-</button>
+              <button
+                id="zoom-in-button"
+                class="icon-button map-control-button"
+                type="button"
+                aria-label="Zoom in"
+                title="Zoom in"
+                data-tooltip="Zoom in"
+              >+</button>
             </div>
-            <div id="mobile-details-content" class="details-content mobile-details-content">
-              Tap a visible MR3 cell to inspect it.
-            </div>
-          </div>
-          <div class="map-controls" aria-label="Map controls">
-            <button
-              id="refresh-button"
-              class="icon-button map-control-button"
-              type="button"
-              aria-label="Refresh world map"
-              title="Refresh world map"
-              data-tooltip="Refresh map"
-              disabled
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 5a7 7 0 1 1-6.65 9.18 1 1 0 1 1 1.9-.62A5 5 0 1 0 8 8.58V11a1 1 0 0 1-1.7.71l-3-3a1 1 0 0 1 0-1.42l3-3A1 1 0 0 1 8 5v1.46A6.96 6.96 0 0 1 12 5Z" />
-              </svg>
-              <span id="refresh-button-cooldown" class="map-control-cooldown" aria-hidden="true" hidden></span>
-            </button>
-            <button
-              id="find-home-button"
-              class="icon-button map-control-button"
-              type="button"
-              aria-label="Find home base"
-              title="Find home base"
-              data-tooltip="Find home base"
-              disabled
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 3 3 10.5V21h6v-5h6v5h6V10.5L12 3Z" />
-              </svg>
-            </button>
-            <button
-              id="zoom-out-button"
-              class="icon-button map-control-button"
-              type="button"
-              aria-label="Zoom out"
-              title="Zoom out"
-              data-tooltip="Zoom out"
-            >-</button>
-            <button
-              id="zoom-in-button"
-              class="icon-button map-control-button"
-              type="button"
-              aria-label="Zoom in"
-              title="Zoom in"
-              data-tooltip="Zoom in"
-            >+</button>
           </div>
         </section>
       </main>
+
+      <!-- Worlds/Leaderboard modal — stats only, cannot change which world's map you view -->
+      <div id="worlds-modal" class="modal-overlay" hidden>
+        <div class="panel modal-panel worlds-modal-panel">
+          <div class="worlds-modal-header">
+            <div>
+              <p class="eyebrow">Stats</p>
+              <h2>MR3 Worlds</h2>
+            </div>
+            <button id="worlds-close-button" class="cell-detail-close" type="button" aria-label="Close" title="Close">×</button>
+          </div>
+          <p class="notice">
+            The current BYM API only exposes MR3 cells for the authenticated player's current world — this
+            list is for leaderboard stats only and does not change which world's map you're viewing.
+          </p>
+          <div id="world-list" class="world-list"></div>
+          <div class="leaderboard-panel">
+            <h2 id="leaderboard-title">No world selected</h2>
+            <div id="leaderboard-list" class="leaderboard-list"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script type="module" src="/app.js"></script>

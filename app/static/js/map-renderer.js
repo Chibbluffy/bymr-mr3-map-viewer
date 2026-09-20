@@ -28,6 +28,9 @@
 const WHEEL_ZOOM_MULTIPLIER = 1.14;
 const LABEL_RENDER_ZOOM_MIN = 0.55;
 const DEFAULT_MAP_ZOOM = 1;
+const MIN_ZOOM = 0.18;
+// Hexes are MR3.hexWidth (104px) wide at DEFAULT_MAP_ZOOM — don't zoom in past that.
+const MAX_ZOOM = 1;
 
 function normalizeOptionalNumber(value) {
   if (value === undefined || value === null || String(value).trim() === "") {
@@ -77,6 +80,8 @@ export class MapRenderer {
     this.lastPointer = { x: 0, y: 0 };
     this.viewportWidth = 0;
     this.viewportHeight = 0;
+    this.ownedRangeSources = [];
+    this.ownedRangeSourcesDirty = true;
 
     this.canvas.addEventListener("pointerdown", (event) => this.handlePointerDown(event));
     this.canvas.addEventListener("pointermove", (event) => this.handlePointerMove(event));
@@ -206,6 +211,8 @@ export class MapRenderer {
     this.currentUserId = null;
     this.mapMeta = null;
     this.cellCache.clear();
+    this.ownedRangeSources = [];
+    this.ownedRangeSourcesDirty = true;
     this.homeCellKey = null;
     this.hoveredCellKey = null;
     this.selectedCellKey = null;
@@ -471,7 +478,7 @@ export class MapRenderer {
   }
 
   setZoom(nextZoom, focusX, focusY) {
-    const clampedZoom = clamp(nextZoom, 0.18, 1.65);
+    const clampedZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
     const width = this.canvas.clientWidth || 1;
     const height = this.canvas.clientHeight || 1;
     const localFocusX = focusX ?? width * 0.5;
@@ -487,7 +494,7 @@ export class MapRenderer {
   }
 
   animateZoom(nextZoom, focusX, focusY) {
-    const targetZoom = clamp(nextZoom, 0.18, 1.65);
+    const targetZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
     const startZoom = this.zoom;
     if (Math.abs(targetZoom - startZoom) < 0.001) {
       return;
@@ -561,7 +568,7 @@ export class MapRenderer {
   }
 
   animateViewTo(cellX, cellY, nextZoom) {
-    const targetZoom = clamp(nextZoom, 0.18, 1.65);
+    const targetZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
     const width = this.canvas.clientWidth || 1;
     const height = this.canvas.clientHeight || 1;
     const startOffsetX = this.offsetX;
@@ -667,6 +674,34 @@ export class MapRenderer {
 
       this.cellCache.set(cellKey(rawCell.x, rawCell.y), normalized);
     }
+
+    this.ownedRangeSourcesDirty = true;
+  }
+
+  // Self-owned bases with a range, used to draw the territory overlay. Scanning the
+  // whole cell cache (up to 250k cells on a fully-preloaded map) is too slow to redo
+  // every render() call, so it's cached here and only rebuilt after mergeCells().
+  getOwnedRangeSources() {
+    if (!this.ownedRangeSourcesDirty) {
+      return this.ownedRangeSources;
+    }
+
+    this.ownedRangeSources = [];
+    for (const cell of this.cellCache.values()) {
+      if (Number(cell.rel) !== MR3.relationships.self) {
+        continue;
+      }
+
+      const range = Number(cell.r || 0);
+      if (range <= 0 || !this.doesContainDisplayableBase(cell)) {
+        continue;
+      }
+
+      this.ownedRangeSources.push({ x: cell.x, y: cell.y, range });
+    }
+    this.ownedRangeSourcesDirty = false;
+
+    return this.ownedRangeSources;
   }
 
   async restoreFullMapCache() {
@@ -1038,8 +1073,8 @@ export class MapRenderer {
     const center = this.getPointerCenter(pointers[0], pointers[1], rect);
     const nextZoom = clamp(
       this.pinchState.zoom * (this.getPointerDistance(pointers[0], pointers[1]) / this.pinchState.distance),
-      0.18,
-      1.65,
+      MIN_ZOOM,
+      MAX_ZOOM,
     );
     this.zoom = nextZoom;
     this.offsetX = this.pinchState.world.x - center.x / this.zoom;
@@ -1330,20 +1365,7 @@ export class MapRenderer {
   }
 
   drawOwnedRangeOverlays(width, height) {
-    const sources = [];
-    for (const cell of this.cellCache.values()) {
-      if (Number(cell.rel) !== MR3.relationships.self) {
-        continue;
-      }
-
-      const range = Number(cell.r || 0);
-      if (range <= 0 || !this.doesContainDisplayableBase(cell)) {
-        continue;
-      }
-
-      sources.push({ x: cell.x, y: cell.y, range });
-    }
-
+    const sources = this.getOwnedRangeSources();
     if (!sources.length) {
       return;
     }

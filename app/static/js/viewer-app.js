@@ -1,4 +1,4 @@
-﻿import { ApiClient } from "./api-client.js";
+import { ApiClient } from "./api-client.js";
 import { AssetCache } from "./asset-cache.js";
 import { MapRenderer } from "./map-renderer.js";
 import {
@@ -23,11 +23,6 @@ import {
 } from "./shared.js";
 
 const MAP_REFRESH_COOLDOWN_MS = 60_000;
-const MOBILE_LAYOUT_MEDIA_QUERY = "(max-width: 900px)";
-const FILTER_MENU_TRANSITION_MS = 180;
-const SEARCH_RESULTS_TRANSITION_MS = 180;
-const DESKTOP_DETAILS_RESIZE_TRANSITION_MS = 180;
-const MOBILE_DETAILS_RESIZE_TRANSITION_MS = 220;
 const INITIAL_OVERLAY_MESSAGE = "Loading...";
 const SIGNED_OUT_OVERLAY_MESSAGE = "Please log in.";
 
@@ -51,6 +46,7 @@ export class ViewerApp {
     this.leaderboardCache = new Map();
     this.leaderboardRequests = new Map();
     this.selectedWorldId = null;
+    this.ownWorldId = null;
     this.hoveredCell = null;
     this.selectedCell = null;
     this.playerBaseIconUrl = "";
@@ -66,36 +62,10 @@ export class ViewerApp {
     this.refreshInFlight = false;
     this.refreshCooldownUntil = 0;
     this.refreshCooldownTimer = 0;
-    this.sidebarCollapsed = false;
-    this.desktopSidebarToggleVisible = false;
-    this.isMobileLayout = false;
-    this.mobileSidebarOpen = false;
-    this.mobileSearchOpen = false;
-    this.mobileLayoutMediaQuery = window.matchMedia(MOBILE_LAYOUT_MEDIA_QUERY);
-    this.filterMenuCloseTimer = 0;
-    this.searchResultsUi = {
-      map: {
-        closeTimer: 0,
-        resizeFrame: 0,
-        resizeTimer: 0,
-      },
-      filterPlayer: {
-        closeTimer: 0,
-        resizeFrame: 0,
-        resizeTimer: 0,
-      },
-    };
-    this.desktopDetailsResizeFrame = 0;
-    this.desktopDetailsResizeTimer = 0;
-    this.mobileDetailsResizeFrame = 0;
-    this.mobileDetailsResizeTimer = 0;
     this.serverSelection = null;
 
     this.elements = {
       appRoot: document.getElementById("app"),
-      sidebar: document.querySelector(".sidebar"),
-      mapSearchPanel: document.querySelector(".map-search-panel"),
-      sessionPanel: document.querySelector(".session-panel"),
       serverSelect: document.getElementById("server-select"),
       serverCustomFields: document.getElementById("server-custom-fields"),
       serverHostInput: document.getElementById("server-host-input"),
@@ -107,27 +77,29 @@ export class ViewerApp {
       logoutButton: document.getElementById("logout-button"),
       sessionName: document.getElementById("session-name"),
       sessionStatus: document.getElementById("session-status"),
+      sessionTriggerButton: document.getElementById("session-trigger-button"),
+      sessionTriggerLabel: document.getElementById("session-trigger-label"),
+      sessionPopover: document.getElementById("session-popover"),
+      worldsToggleButton: document.getElementById("worlds-toggle-button"),
+      worldsModal: document.getElementById("worlds-modal"),
+      worldsCloseButton: document.getElementById("worlds-close-button"),
       worldList: document.getElementById("world-list"),
       leaderboardTitle: document.getElementById("leaderboard-title"),
       leaderboardList: document.getElementById("leaderboard-list"),
-      detailsPanel: document.querySelector(".details-panel"),
+      cellDetailPanel: document.getElementById("cell-detail-panel"),
       detailsTitle: document.getElementById("details-title"),
       detailsContent: document.getElementById("details-content"),
-      mobileDetailsSheet: document.getElementById("mobile-details-sheet"),
-      mobileDetailsTitle: document.getElementById("mobile-details-title"),
-      mobileDetailsContent: document.getElementById("mobile-details-content"),
-      mobileDetailsCloseButton: document.getElementById("mobile-details-close-button"),
+      detailsCloseButton: document.getElementById("details-close-button"),
       mapCanvas: document.getElementById("map-canvas"),
       mapCoordinates: document.getElementById("map-coordinates"),
       mapOverlay: document.getElementById("map-overlay"),
       searchToggleButton: document.getElementById("search-toggle-button"),
+      searchPanel: document.getElementById("search-panel"),
       searchInput: document.getElementById("search-input"),
       searchResults: document.getElementById("search-results"),
       searchStatus: document.getElementById("search-status"),
-      filterAnchor: document.querySelector(".map-filter-anchor"),
       filterToggleButton: document.getElementById("filter-toggle-button"),
       filterToggleLabel: document.getElementById("filter-toggle-label"),
-      filterStatus: document.getElementById("filter-status"),
       filterMenu: document.getElementById("filter-menu"),
       filterClearButton: document.getElementById("filter-clear-button"),
       filterPlayerInput: document.getElementById("filter-player-input"),
@@ -147,17 +119,23 @@ export class ViewerApp {
       findHomeButton: document.getElementById("find-home-button"),
       zoomInButton: document.getElementById("zoom-in-button"),
       zoomOutButton: document.getElementById("zoom-out-button"),
-      sidebarToggleButton: document.getElementById("sidebar-toggle-button"),
     };
   }
 
   async start() {
     this.localConfig = getLocalViewerConfig();
     this.serverSelection = this.loadServerSelection();
+    this.portalPopovers();
     this.bindEvents();
-    this.syncResponsiveLayout(this.mobileLayoutMediaQuery.matches);
     this.syncServerInputs();
     await this.applyServerSelection({ restoreSession: true });
+  }
+
+  // Portal dropdowns/popovers to <body> — an ancestor's backdrop-filter (the
+  // top-bar, the map tool panels) breaks position:fixed children otherwise.
+  portalPopovers() {
+    [this.elements.sessionPopover, this.elements.searchResults, this.elements.filterPlayerResults]
+      .forEach((el) => { if (el) document.body.appendChild(el); });
   }
 
   bindEvents() {
@@ -172,50 +150,50 @@ export class ViewerApp {
     this.elements.findHomeButton.addEventListener("click", () => this.renderer.focusHome());
     this.elements.zoomInButton.addEventListener("click", () => this.renderer.zoomBy(1.18, true));
     this.elements.zoomOutButton.addEventListener("click", () => this.renderer.zoomBy(1 / 1.18, true));
-    this.elements.mobileDetailsCloseButton.addEventListener("click", () => this.handleMobileDetailsClose());
-    this.elements.sidebarToggleButton.addEventListener("click", () => this.toggleSidebar());
+
+    this.elements.sessionTriggerButton.addEventListener("click", () => this.toggleSessionPopover());
+    this.elements.worldsToggleButton.addEventListener("click", () => this.openWorldsModal());
+    this.elements.worldsCloseButton.addEventListener("click", () => this.closeWorldsModal());
+    this.elements.worldsModal.addEventListener("click", (event) => {
+      if (event.target === this.elements.worldsModal) {
+        this.closeWorldsModal();
+      }
+    });
+
+    this.elements.detailsCloseButton.addEventListener("click", () => this.handleDetailsClose());
+
     this.elements.searchToggleButton.addEventListener("click", () => this.handleSearchToggle());
     this.elements.searchInput.addEventListener("input", () => this.handleSearchInput());
     this.elements.searchInput.addEventListener("keydown", (event) => this.handleSearchKeyDown(event));
     this.elements.searchInput.addEventListener("focus", () => this.renderSearchResults());
-    this.elements.searchInput.addEventListener("click", () => this.handleSearchInputTap());
     this.elements.searchInput.addEventListener("blur", () => {
-      window.setTimeout(() => {
-        if (this.isMobileLayout && this.mobileSearchOpen) {
-          this.renderSearchResults();
-          return;
-        }
-        this.hideSearchResults();
-      }, 120);
+      window.setTimeout(() => this.hideSearchResults(), 120);
     });
+
     this.elements.filterToggleButton.addEventListener("click", () => this.handleFilterToggle());
     this.elements.filterClearButton.addEventListener("click", () => this.clearFilters());
     this.elements.filterPlayerInput.addEventListener("input", () => this.handlePlayerFilterInput());
     this.elements.filterPlayerInput.addEventListener("keydown", (event) => this.handlePlayerFilterKeyDown(event));
     this.elements.filterPlayerInput.addEventListener("focus", () => this.handlePlayerFilterFocus());
-    this.elements.filterPlayerInput.addEventListener("click", () => this.handlePlayerFilterInputTap());
     this.elements.filterPlayerInput.addEventListener("blur", () => {
-      window.setTimeout(() => {
-        if (this.isMobileLayout && this.filterMenuOpen) {
-          this.renderPlayerFilterResults();
-          return;
-        }
-        this.hidePlayerFilterResults();
-      }, 120);
+      window.setTimeout(() => this.hidePlayerFilterResults(), 120);
     });
     this.elements.filterTypeOptions.addEventListener("change", (event) => this.handleFilterOptionChange(event));
     this.elements.filterTribeOptions.addEventListener("change", (event) => this.handleFilterOptionChange(event));
     this.elements.filterLevelMinInput.addEventListener("input", (event) => this.handleLevelRangeInput(event));
     this.elements.filterLevelMaxInput.addEventListener("input", (event) => this.handleLevelRangeInput(event));
+
     document.addEventListener("pointerdown", (event) => this.handleGlobalPointerDown(event));
     document.addEventListener("keydown", (event) => this.handleGlobalKeyDown(event));
 
-    const handleLayoutChange = (event) => this.syncResponsiveLayout(event.matches);
-    if (typeof this.mobileLayoutMediaQuery.addEventListener === "function") {
-      this.mobileLayoutMediaQuery.addEventListener("change", handleLayoutChange);
-    } else if (typeof this.mobileLayoutMediaQuery.addListener === "function") {
-      this.mobileLayoutMediaQuery.addListener(handleLayoutChange);
-    }
+    // Re-clamp whichever top-bar popover is open on resize/orientation change —
+    // its position is computed once at open time, not tracked continuously.
+    window.addEventListener("resize", () => {
+      const { sessionPopover, sessionTriggerButton } = this.elements;
+      if (!sessionPopover.hidden) {
+        this.positionPopover(sessionPopover, sessionTriggerButton, 300, { align: "right" });
+      }
+    });
   }
 
   loadServerSelection() {
@@ -348,6 +326,7 @@ export class ViewerApp {
     this.leaderboardCache = new Map();
     this.leaderboardRequests = new Map();
     this.selectedWorldId = null;
+    this.ownWorldId = null;
     this.hoveredCell = null;
     this.selectedCell = null;
     this.refreshInFlight = false;
@@ -435,9 +414,9 @@ export class ViewerApp {
       this.session = session;
       this.elements.logoutButton.hidden = false;
       this.elements.loginForm.hidden = true;
-      this.elements.sessionPanel.classList.add("signed-in");
+      this.elements.sessionPopover.classList.add("signed-in");
       this.elements.sessionName.textContent = session.user.username || "Signed in";
-      this.setSidebarToggleVisible(true);
+      this.elements.sessionTriggerLabel.textContent = session.user.username || "Signed in";
       this.refreshCooldownUntil = 0;
       this.clearRefreshCooldownTimer();
       this.setSessionStatus("");
@@ -448,6 +427,7 @@ export class ViewerApp {
       // error. Check up front and point the player at the right viewer
       // instead of silently rendering an empty map.
       const wrongVersionMessage = await this.checkMapVersion();
+      this.selectDefaultWorld();
       if (wrongVersionMessage) {
         // #session-status is CSS-hidden once .signed-in is set (it's meant
         // for pre-login status only), so the link-carrying message has to go
@@ -476,7 +456,7 @@ export class ViewerApp {
       );
       this.setFilterEnabled(true);
       this.renderDetails();
-      this.setMobileSidebarOpen(false);
+      this.closeSessionPopover();
     } finally {
       this.elements.loginButton.disabled = false;
     }
@@ -498,6 +478,8 @@ export class ViewerApp {
     } catch {
       return null;
     }
+
+    this.ownWorldId = worldid || null;
 
     if (!worldid) return WRONG_MAP_VERSION_MESSAGE;
 
@@ -542,6 +524,7 @@ export class ViewerApp {
     this.clearRefreshCooldownTimer();
     window.localStorage.removeItem(buildTokenStorageKey(this.config));
     this.session = null;
+    this.ownWorldId = null;
     this.setSignedOutState({ sessionStatus: message });
   }
 
@@ -579,19 +562,92 @@ export class ViewerApp {
     }
   }
 
+  // ─── Session popover (top bar) ─────────────────────────────────────────
+
+  toggleSessionPopover() {
+    if (this.elements.sessionPopover.hidden) {
+      this.openSessionPopover();
+    } else {
+      this.closeSessionPopover();
+    }
+  }
+
+  openSessionPopover() {
+    const { sessionPopover, sessionTriggerButton, emailInput } = this.elements;
+    this.positionPopover(sessionPopover, sessionTriggerButton, 300, { align: "right" });
+    sessionPopover.hidden = false;
+    sessionTriggerButton.setAttribute("aria-expanded", "true");
+    if (!this.session) {
+      emailInput.focus();
+    }
+  }
+
+  closeSessionPopover() {
+    const { sessionPopover, sessionTriggerButton } = this.elements;
+    sessionPopover.hidden = true;
+    sessionTriggerButton.setAttribute("aria-expanded", "false");
+  }
+
+  // ─── Worlds/leaderboard modal (stats only — never changes the viewed world) ──
+
+  openWorldsModal() {
+    this.elements.worldsModal.hidden = false;
+  }
+
+  closeWorldsModal() {
+    this.elements.worldsModal.hidden = true;
+  }
+
+  // Positions a fixed popover near its anchor with its own preferred width,
+  // clamped so it never runs off either edge of a narrow viewport.
+  positionPopover(popover, anchor, preferredWidth, { align = "left" } = {}) {
+    const margin = 12;
+    const rect = anchor.getBoundingClientRect();
+    const width = Math.min(preferredWidth, window.innerWidth - margin * 2);
+    let left = align === "right" ? rect.right - width : rect.left;
+    left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+    popover.style.top = `${rect.bottom + 8}px`;
+    popover.style.left = `${left}px`;
+    popover.style.width = `${width}px`;
+  }
+
+  // Positions a fixed dropdown directly below an anchor, matching its width.
+  positionDropdown(dropdown, anchor) {
+    const rect = anchor.getBoundingClientRect();
+    dropdown.style.top = `${rect.bottom + 4}px`;
+    dropdown.style.left = `${rect.left}px`;
+    dropdown.style.width = `${rect.width}px`;
+  }
+
   async loadWorlds() {
     const worldsResponse = await this.api.getWorlds();
     this.worlds = (worldsResponse.worlds || [])
       .filter((world) => Number(world.map_version) === 3)
       .sort((left, right) => Number(right.playerCount || 0) - Number(left.playerCount || 0));
 
-    this.selectedWorldId = this.worlds[0]?.uuid || null;
+    await this.selectDefaultWorld();
+    this.prefetchLeaderboards(this.worlds
+      .map((world) => world.uuid)
+      .filter((worldId) => worldId && worldId !== this.selectedWorldId));
+  }
+
+  // Prefers the logged-in account's own world (once checkMapVersion() has
+  // resolved it) over the busiest one. Called from both loadWorlds() and
+  // establishSession() since they run in parallel and either can resolve
+  // ownWorldId first — a no-op if the right world is already selected.
+  async selectDefaultWorld() {
+    const preferredId = this.ownWorldId && this.worlds.some((world) => world.uuid === this.ownWorldId)
+      ? this.ownWorldId
+      : (this.worlds[0]?.uuid || null);
+
+    if (preferredId === this.selectedWorldId) {
+      return;
+    }
+
+    this.selectedWorldId = preferredId;
     this.renderWorldList();
     if (this.selectedWorldId) {
       await this.loadLeaderboard(this.selectedWorldId);
-      this.prefetchLeaderboards(this.worlds
-        .map((world) => world.uuid)
-        .filter((worldId) => worldId && worldId !== this.selectedWorldId));
     }
   }
 
@@ -711,57 +767,43 @@ export class ViewerApp {
     this.renderDetails();
   }
 
-  renderDetails() {
-    const shouldAnimateDesktopResize = !this.isMobileLayout && Boolean(this.elements.detailsPanel);
-    const previousDesktopDetailsHeight = shouldAnimateDesktopResize
-      ? this.elements.detailsPanel.getBoundingClientRect().height
-      : 0;
-    const shouldAnimateMobileResize = (
-      this.isMobileLayout &&
-      Boolean(this.selectedCell) &&
-      this.elements.appRoot.classList.contains("mobile-details-open")
-    );
-    const previousMobileDetailsHeight = shouldAnimateMobileResize
-      ? this.elements.mobileDetailsSheet.getBoundingClientRect().height
-      : 0;
+  handleDetailsClose() {
+    if (this.renderer) {
+      this.renderer.clearSelection();
+      return;
+    }
 
-    this.renderDetailsPanel({
-      titleEl: this.elements.detailsTitle,
-      contentEl: this.elements.detailsContent,
-      cell: this.selectedCell || this.hoveredCell || null,
-      emptyMessage: "Hover or select a visible MR3 cell to inspect it.",
-    });
-    this.renderDetailsPanel({
-      titleEl: this.elements.mobileDetailsTitle,
-      contentEl: this.elements.mobileDetailsContent,
-      cell: this.selectedCell || null,
-      emptyMessage: "Tap a visible MR3 cell to inspect it.",
-    });
-    this.animateDesktopDetailsResize(previousDesktopDetailsHeight, shouldAnimateDesktopResize);
-    this.syncMobileDetailsState();
-    this.animateMobileDetailsResize(previousMobileDetailsHeight, shouldAnimateMobileResize);
+    this.selectedCell = null;
+    this.hoveredCell = null;
+    this.renderDetails();
   }
 
-  renderDetailsPanel({ titleEl, contentEl, cell, emptyMessage }) {
-    if (!titleEl || !contentEl) {
-      return;
-    }
+  // ─── Cell details panel — hover previews, click pins it open ───────────
 
-    contentEl.replaceChildren();
+  renderDetails() {
+    this.renderDetailsPanel(this.selectedCell || this.hoveredCell || null);
+  }
+
+  renderDetailsPanel(cell) {
+    const { cellDetailPanel, detailsTitle, detailsContent, detailsCloseButton } = this.elements;
+    detailsContent.replaceChildren();
 
     if (!cell) {
-      titleEl.textContent = "No selection";
-      contentEl.textContent = emptyMessage;
+      cellDetailPanel.hidden = true;
+      detailsTitle.textContent = "No selection";
+      detailsContent.textContent = "Hover or select a visible MR3 cell to inspect it.";
       return;
     }
 
-    titleEl.textContent = cell.n || `${cell.x}, ${cell.y}`;
+    cellDetailPanel.hidden = false;
+    detailsCloseButton.hidden = !this.selectedCell;
+    detailsTitle.textContent = cell.n || `${cell.x}, ${cell.y}`;
 
     for (const [label, value] of this.buildDetailRows(cell)) {
       const row = document.createElement("div");
       row.className = "detail-row";
       row.innerHTML = `<span class="detail-label">${escapeHtml(label)}</span><span>${escapeHtml(value)}</span>`;
-      contentEl.appendChild(row);
+      detailsContent.appendChild(row);
     }
   }
 
@@ -901,16 +943,15 @@ export class ViewerApp {
 
   setSearchEnabled(enabled, message = "") {
     this.elements.searchInput.disabled = !enabled;
+    this.elements.searchToggleButton.disabled = !enabled;
+
     if (!enabled) {
       this.searchEntries = [];
       this.searchMatches = [];
       this.searchActiveIndex = -1;
       this.elements.searchInput.value = "";
-      this.setMobileSearchOpen(false);
-      this.hideSearchResults();
+      this.setSearchPanelOpen(false);
     }
-
-    this.syncSearchToggleButtonState();
 
     if (this.elements.searchStatus) {
       this.elements.searchStatus.hidden = !message;
@@ -933,10 +974,32 @@ export class ViewerApp {
     this.renderFilterOptions();
     this.syncFilterButtonState();
     this.renderer?.setBaseFilter(this.filterState);
-    this.updateFilterStatus(enabled);
     this.updateFilterMatchCount(enabled);
     if (!enabled) {
       this.hidePlayerFilterResults();
+    }
+  }
+
+  // ─── Map search + filter — floating buttons over the map ───────────────
+
+  handleSearchToggle() {
+    if (this.elements.searchToggleButton.disabled) {
+      return;
+    }
+
+    this.setSearchPanelOpen(this.elements.searchPanel.hidden);
+  }
+
+  setSearchPanelOpen(isOpen) {
+    const nextIsOpen = Boolean(isOpen) && !this.elements.searchToggleButton.disabled;
+    this.elements.searchPanel.hidden = !nextIsOpen;
+    this.elements.searchToggleButton.setAttribute("aria-expanded", String(nextIsOpen));
+    this.elements.searchToggleButton.classList.toggle("active", nextIsOpen);
+
+    if (nextIsOpen) {
+      this.elements.searchInput.focus();
+    } else {
+      this.hideSearchResults();
     }
   }
 
@@ -950,47 +1013,11 @@ export class ViewerApp {
 
   setFilterMenuOpen(isOpen) {
     const nextIsOpen = Boolean(isOpen) && !this.elements.filterToggleButton.disabled;
-
-    if (this.filterMenuCloseTimer) {
-      window.clearTimeout(this.filterMenuCloseTimer);
-      this.filterMenuCloseTimer = 0;
-    }
-
-    if (nextIsOpen && this.isMobileLayout) {
-      this.setMobileSidebarOpen(false);
-      this.setMobileSearchOpen(false);
-    }
-
     this.filterMenuOpen = nextIsOpen;
-
-    if (this.filterMenuOpen) {
-      this.elements.filterMenu.hidden = false;
-      this.elements.filterMenu.classList.remove("closing");
-      window.requestAnimationFrame(() => {
-        if (!this.filterMenuOpen) {
-          return;
-        }
-        this.elements.filterMenu.classList.add("open");
-      });
-    } else {
-      this.elements.filterMenu.classList.remove("open");
-      if (!this.elements.filterMenu.hidden) {
-        this.elements.filterMenu.classList.add("closing");
-        this.filterMenuCloseTimer = window.setTimeout(() => {
-          if (this.filterMenuOpen) {
-            return;
-          }
-          this.elements.filterMenu.hidden = true;
-          this.elements.filterMenu.classList.remove("closing");
-          this.filterMenuCloseTimer = 0;
-        }, FILTER_MENU_TRANSITION_MS);
-      }
-    }
-
-    this.elements.appRoot.classList.toggle("mobile-filter-open", this.isMobileLayout && this.filterMenuOpen);
-    this.elements.filterToggleButton.setAttribute("aria-expanded", String(this.filterMenuOpen));
+    this.elements.filterMenu.hidden = !nextIsOpen;
+    this.elements.filterToggleButton.setAttribute("aria-expanded", String(nextIsOpen));
     this.syncFilterButtonState();
-    if (!this.filterMenuOpen) {
+    if (!nextIsOpen) {
       this.hidePlayerFilterResults();
     }
   }
@@ -1056,25 +1083,6 @@ export class ViewerApp {
     this.renderPlayerFilterResults();
   }
 
-  handlePlayerFilterInputTap() {
-    if (!this.isMobileLayout || !this.filterMenuOpen) {
-      return;
-    }
-
-    const value = this.elements.filterPlayerInput.value;
-    if (!value) {
-      return;
-    }
-
-    window.setTimeout(() => {
-      if (document.activeElement !== this.elements.filterPlayerInput) {
-        return;
-      }
-
-      this.elements.filterPlayerInput.setSelectionRange(0, value.length);
-    }, 0);
-  }
-
   handlePlayerFilterKeyDown(event) {
     if (event.key === "ArrowDown" && this.playerFilterMatches.length) {
       event.preventDefault();
@@ -1118,8 +1126,6 @@ export class ViewerApp {
       inputEl: this.elements.filterPlayerInput,
       matches: this.playerFilterMatches,
       activeIndex: this.playerFilterActiveIndex,
-      uiState: this.searchResultsUi.filterPlayer,
-      shouldStayClosed: false,
       onHover: (index) => {
         this.playerFilterActiveIndex = index;
         this.syncPlayerFilterActiveResult();
@@ -1129,7 +1135,7 @@ export class ViewerApp {
   }
 
   hidePlayerFilterResults() {
-    this.setSearchResultsOpen(this.elements.filterPlayerResults, false, this.searchResultsUi.filterPlayer);
+    this.elements.filterPlayerResults.hidden = true;
   }
 
   syncPlayerFilterActiveResult() {
@@ -1241,7 +1247,6 @@ export class ViewerApp {
   applyFilters() {
     this.renderer?.setBaseFilter(this.filterState);
     this.syncFilterButtonState();
-    this.updateFilterStatus(true);
     this.updateFilterMatchCount(true);
   }
 
@@ -1475,54 +1480,6 @@ export class ViewerApp {
     this.elements.filterToggleButton.title = label;
   }
 
-  updateFilterStatus(isEnabled) {
-    if (!this.elements.filterStatus) {
-      return;
-    }
-
-    if (!isEnabled) {
-      this.elements.filterStatus.textContent = "Sign in to enable base filters.";
-      return;
-    }
-
-    if (!hasActiveBaseFilterState(this.filterState)) {
-      this.elements.filterStatus.textContent = "Showing all visible bases.";
-      return;
-    }
-
-    const segments = [];
-    if (this.filterState.types.length) {
-      const labels = TYPE_FILTER_OPTIONS
-        .filter((option) => this.filterState.types.includes(option.key))
-        .map((option) => option.label);
-      segments.push(`Type: ${labels.join(", ")}`);
-    }
-
-    if (this.filterState.tribes.length) {
-      const labels = TRIBE_FILTER_OPTIONS
-        .filter((option) => this.filterState.tribes.includes(option.key))
-        .map((option) => option.label);
-      segments.push(`Tribe: ${labels.join(", ")}`);
-    }
-
-    if (Number(this.filterState.levelMin || 0) > 0 || Number(this.filterState.levelMax || 0) > 0) {
-      const levelState = this.getLevelFilterDisplayState();
-      if (levelState.minLevel !== null && levelState.maxLevel !== null) {
-        segments.push(
-          levelState.minLevel === levelState.maxLevel
-            ? `Level: ${levelState.minLevel}`
-            : `Levels: ${levelState.minLevel}-${levelState.maxLevel}`,
-        );
-      }
-    }
-
-    if (this.filterState.playerUsername) {
-      segments.push(`Player: ${this.filterState.playerUsername}`);
-    }
-
-    this.elements.filterStatus.textContent = segments.join(" | ");
-  }
-
   updateRefreshButtonState() {
     const button = this.elements.refreshButton;
     const cooldownBadge = this.elements.refreshButtonCooldown;
@@ -1584,329 +1541,6 @@ export class ViewerApp {
     this.refreshCooldownTimer = 0;
   }
 
-  syncResponsiveLayout(isMobile) {
-    const nextIsMobile = Boolean(isMobile);
-    if (this.isMobileLayout === nextIsMobile) {
-      this.syncSidebarToggleVisibility();
-      this.syncSearchToggleButtonState();
-      this.syncFilterButtonState();
-      return;
-    }
-
-    this.isMobileLayout = nextIsMobile;
-    this.elements.appRoot.classList.toggle("mobile-layout", this.isMobileLayout);
-
-    this.setSidebarCollapsed(false, { render: false });
-    this.setMobileSidebarOpen(false);
-    this.setMobileSearchOpen(false);
-    this.setFilterMenuOpen(false);
-    this.hideSearchResults();
-    this.hidePlayerFilterResults();
-    this.syncSidebarToggleVisibility();
-    this.syncSearchToggleButtonState();
-    this.syncFilterButtonState();
-    this.syncMobileDetailsState();
-    this.cancelDesktopDetailsResizeAnimation();
-    if (this.elements.detailsPanel) {
-      this.elements.detailsPanel.style.height = "";
-    }
-    this.renderer?.render();
-  }
-
-  toggleSidebar() {
-    if (this.isMobileLayout) {
-      this.setMobileSidebarOpen(!this.mobileSidebarOpen);
-      return;
-    }
-
-    this.setSidebarCollapsed(!this.sidebarCollapsed);
-  }
-
-  setSidebarCollapsed(collapsed, { render = true } = {}) {
-    this.sidebarCollapsed = !this.isMobileLayout && Boolean(collapsed);
-    this.elements.appRoot.classList.toggle("sidebar-collapsed", this.sidebarCollapsed);
-    this.syncSidebarToggleButtonState();
-    if (render) {
-      window.setTimeout(() => this.renderer?.render(), 200);
-    }
-  }
-
-  setSidebarToggleVisible(visible) {
-    this.desktopSidebarToggleVisible = Boolean(visible);
-    this.syncSidebarToggleVisibility();
-    if (!visible && !this.isMobileLayout) {
-      this.setSidebarCollapsed(false);
-    }
-  }
-
-  syncSidebarToggleVisibility() {
-    this.elements.sidebarToggleButton.hidden = !(this.isMobileLayout || this.desktopSidebarToggleVisible);
-    this.syncSidebarToggleButtonState();
-  }
-
-  syncSidebarToggleButtonState() {
-    if (this.isMobileLayout) {
-      this.elements.sidebarToggleButton.setAttribute("aria-expanded", String(this.mobileSidebarOpen));
-      this.elements.sidebarToggleButton.setAttribute(
-        "aria-label",
-        this.mobileSidebarOpen ? "Close menu" : "Open menu",
-      );
-      this.elements.sidebarToggleButton.title = this.mobileSidebarOpen ? "Close menu" : "Open menu";
-      return;
-    }
-
-    this.elements.sidebarToggleButton.setAttribute("aria-expanded", String(!this.sidebarCollapsed));
-    this.elements.sidebarToggleButton.setAttribute(
-      "aria-label",
-      this.sidebarCollapsed ? "Show sidebar" : "Hide sidebar",
-    );
-    this.elements.sidebarToggleButton.title = this.sidebarCollapsed ? "Show sidebar" : "Hide sidebar";
-  }
-
-  setMobileSidebarOpen(isOpen) {
-    const nextIsOpen = this.isMobileLayout && Boolean(isOpen);
-    this.mobileSidebarOpen = nextIsOpen;
-    this.elements.appRoot.classList.toggle("mobile-sidebar-open", this.mobileSidebarOpen);
-    this.syncSidebarToggleButtonState();
-
-    if (this.mobileSidebarOpen) {
-      this.setMobileSearchOpen(false);
-      this.setFilterMenuOpen(false);
-    }
-  }
-
-  syncMobileDetailsState() {
-    const isOpen = this.isMobileLayout && Boolean(this.selectedCell);
-    this.elements.appRoot.classList.toggle("mobile-details-open", isOpen);
-    this.elements.mobileDetailsSheet.setAttribute("aria-hidden", String(!isOpen));
-
-    if (!isOpen) {
-      this.cancelMobileDetailsResizeAnimation();
-      this.elements.mobileDetailsSheet.style.height = "";
-    }
-  }
-
-  animateDesktopDetailsResize(previousHeight, shouldAnimate) {
-    const panel = this.elements.detailsPanel;
-    if (!panel) {
-      return;
-    }
-
-    this.cancelDesktopDetailsResizeAnimation();
-
-    if (!shouldAnimate || this.isMobileLayout) {
-      panel.style.height = "";
-      return;
-    }
-
-    const nextHeight = panel.getBoundingClientRect().height;
-    if (!previousHeight || Math.abs(nextHeight - previousHeight) < 1) {
-      panel.style.height = "";
-      return;
-    }
-
-    panel.style.height = `${previousHeight}px`;
-    void panel.offsetHeight;
-
-    this.desktopDetailsResizeFrame = window.requestAnimationFrame(() => {
-      this.desktopDetailsResizeFrame = 0;
-      panel.style.height = `${nextHeight}px`;
-      this.desktopDetailsResizeTimer = window.setTimeout(() => {
-        this.desktopDetailsResizeTimer = 0;
-        if (!this.isMobileLayout) {
-          panel.style.height = "";
-        }
-      }, DESKTOP_DETAILS_RESIZE_TRANSITION_MS);
-    });
-  }
-
-  cancelDesktopDetailsResizeAnimation() {
-    if (this.desktopDetailsResizeFrame) {
-      window.cancelAnimationFrame(this.desktopDetailsResizeFrame);
-      this.desktopDetailsResizeFrame = 0;
-    }
-
-    if (this.desktopDetailsResizeTimer) {
-      window.clearTimeout(this.desktopDetailsResizeTimer);
-      this.desktopDetailsResizeTimer = 0;
-    }
-  }
-
-  handleMobileDetailsClose() {
-    if (this.renderer) {
-      this.renderer.clearSelection();
-      return;
-    }
-
-    this.selectedCell = null;
-    this.hoveredCell = null;
-    this.renderDetails();
-  }
-
-  animateMobileDetailsResize(previousHeight, shouldAnimate) {
-    const sheet = this.elements.mobileDetailsSheet;
-    if (!sheet) {
-      return;
-    }
-
-    this.cancelMobileDetailsResizeAnimation();
-
-    if (
-      !shouldAnimate ||
-      !this.isMobileLayout ||
-      !this.selectedCell ||
-      !this.elements.appRoot.classList.contains("mobile-details-open")
-    ) {
-      sheet.style.height = "";
-      return;
-    }
-
-    const nextHeight = sheet.getBoundingClientRect().height;
-    if (!previousHeight || Math.abs(nextHeight - previousHeight) < 1) {
-      sheet.style.height = "";
-      return;
-    }
-
-    sheet.style.height = `${previousHeight}px`;
-    void sheet.offsetHeight;
-
-    this.mobileDetailsResizeFrame = window.requestAnimationFrame(() => {
-      this.mobileDetailsResizeFrame = 0;
-      sheet.style.height = `${nextHeight}px`;
-      this.mobileDetailsResizeTimer = window.setTimeout(() => {
-        this.mobileDetailsResizeTimer = 0;
-        if (this.isMobileLayout && this.selectedCell) {
-          sheet.style.height = "";
-        }
-      }, MOBILE_DETAILS_RESIZE_TRANSITION_MS);
-    });
-  }
-
-  cancelMobileDetailsResizeAnimation() {
-    if (this.mobileDetailsResizeFrame) {
-      window.cancelAnimationFrame(this.mobileDetailsResizeFrame);
-      this.mobileDetailsResizeFrame = 0;
-    }
-
-    if (this.mobileDetailsResizeTimer) {
-      window.clearTimeout(this.mobileDetailsResizeTimer);
-      this.mobileDetailsResizeTimer = 0;
-    }
-  }
-
-  handleSearchToggle() {
-    if (this.elements.searchToggleButton.disabled) {
-      return;
-    }
-
-    if (!this.isMobileLayout) {
-      this.elements.searchInput.focus();
-      return;
-    }
-
-    const nextIsOpen = !this.mobileSearchOpen;
-    if (nextIsOpen) {
-      this.setMobileSidebarOpen(false);
-      this.setFilterMenuOpen(false);
-    }
-    this.setMobileSearchOpen(nextIsOpen, { focus: nextIsOpen });
-  }
-
-  handleSearchInputTap() {
-    if (!this.isMobileLayout || !this.mobileSearchOpen) {
-      return;
-    }
-
-    const value = this.elements.searchInput.value;
-    if (!value) {
-      return;
-    }
-
-    window.setTimeout(() => {
-      if (document.activeElement !== this.elements.searchInput) {
-        return;
-      }
-
-      this.elements.searchInput.setSelectionRange(0, value.length);
-    }, 0);
-  }
-
-  setMobileSearchOpen(isOpen, { focus = false } = {}) {
-    const nextIsOpen = this.isMobileLayout && Boolean(isOpen);
-    this.mobileSearchOpen = nextIsOpen;
-    this.elements.appRoot.classList.toggle("mobile-search-open", this.mobileSearchOpen);
-    this.syncSearchToggleButtonState();
-
-    if (!this.mobileSearchOpen) {
-      this.hideSearchResults();
-      if (document.activeElement === this.elements.searchInput) {
-        this.elements.searchInput.blur();
-      }
-      return;
-    }
-
-    if (focus) {
-      window.setTimeout(() => this.elements.searchInput.focus(), 0);
-    }
-  }
-
-  syncSearchToggleButtonState() {
-    const isOpen = this.isMobileLayout && this.mobileSearchOpen;
-    this.elements.searchToggleButton.disabled = this.elements.searchInput.disabled;
-    this.elements.searchToggleButton.setAttribute("aria-expanded", String(isOpen));
-    this.elements.searchToggleButton.setAttribute("aria-label", isOpen ? "Close search" : "Open search");
-    this.elements.searchToggleButton.title = isOpen ? "Close search" : "Search";
-  }
-
-  handleGlobalPointerDown(event) {
-    if (!(event.target instanceof Node)) {
-      return;
-    }
-
-    if (
-      this.filterMenuOpen &&
-      !this.elements.filterAnchor.contains(event.target) &&
-      !this.elements.filterMenu.contains(event.target)
-    ) {
-      this.setFilterMenuOpen(false);
-    }
-
-    if (this.isMobileLayout && this.mobileSearchOpen && !this.elements.mapSearchPanel.contains(event.target)) {
-      this.setMobileSearchOpen(false);
-    }
-
-    if (this.isMobileLayout && this.mobileSidebarOpen && event.target === this.elements.sidebar) {
-      this.setMobileSidebarOpen(false);
-    }
-  }
-
-  handleGlobalKeyDown(event) {
-    if (event.key !== "Escape") {
-      return;
-    }
-
-    let didHandle = false;
-
-    if (this.filterMenuOpen) {
-      this.setFilterMenuOpen(false);
-      didHandle = true;
-    }
-
-    if (this.isMobileLayout && this.mobileSearchOpen) {
-      this.setMobileSearchOpen(false);
-      didHandle = true;
-    }
-
-    if (this.isMobileLayout && this.mobileSidebarOpen) {
-      this.setMobileSidebarOpen(false);
-      didHandle = true;
-    }
-
-    if (didHandle) {
-      event.preventDefault();
-    }
-  }
-
   handleSearchInput() {
     const query = this.elements.searchInput.value.trim().toLocaleLowerCase();
     if (!query) {
@@ -1938,11 +1572,7 @@ export class ViewerApp {
     }
 
     if (event.key === "Escape") {
-      if (this.isMobileLayout) {
-        this.setMobileSearchOpen(false);
-      } else {
-        this.hideSearchResults();
-      }
+      this.setSearchPanelOpen(false);
       return;
     }
 
@@ -1963,8 +1593,6 @@ export class ViewerApp {
       inputEl: this.elements.searchInput,
       matches: this.searchMatches,
       activeIndex: this.searchActiveIndex,
-      uiState: this.searchResultsUi.map,
-      shouldStayClosed: this.isMobileLayout && !this.mobileSearchOpen,
       onHover: (index) => {
         this.searchActiveIndex = index;
         this.syncSearchActiveResult();
@@ -1974,7 +1602,7 @@ export class ViewerApp {
   }
 
   hideSearchResults() {
-    this.setSearchResultsOpen(this.elements.searchResults, false, this.searchResultsUi.map);
+    this.elements.searchResults.hidden = true;
   }
 
   getRankedSearchMatches(entries, query) {
@@ -2012,23 +1640,12 @@ export class ViewerApp {
       .slice(0, SEARCH_RESULT_LIMIT);
   }
 
-  renderSearchResultsDropdown({
-    resultsEl,
-    inputEl,
-    matches,
-    activeIndex,
-    uiState,
-    shouldStayClosed,
-    onHover,
-    onSelect,
-  }) {
+  renderSearchResultsDropdown({ resultsEl, inputEl, matches, activeIndex, onHover, onSelect }) {
     const query = inputEl.value.trim();
-    const shouldAnimateResize = !resultsEl.hidden && resultsEl.classList.contains("open");
-    const previousResultsHeight = shouldAnimateResize ? resultsEl.getBoundingClientRect().height : 0;
     resultsEl.replaceChildren();
 
-    if (!query || !matches.length || inputEl.disabled || shouldStayClosed) {
-      this.setSearchResultsOpen(resultsEl, false, uiState);
+    if (!query || !matches.length || inputEl.disabled) {
+      resultsEl.hidden = true;
       return;
     }
 
@@ -2042,9 +1659,9 @@ export class ViewerApp {
       }));
     });
 
-    this.setSearchResultsOpen(resultsEl, true, uiState);
+    this.positionDropdown(resultsEl, inputEl);
+    resultsEl.hidden = false;
     this.syncSearchActiveResult(resultsEl, activeIndex);
-    this.animateSearchResultsResize(resultsEl, uiState, previousResultsHeight, shouldAnimateResize);
   }
 
   buildSearchResultButton({ entry, index, activeIndex, onHover, onSelect }) {
@@ -2070,87 +1687,6 @@ export class ViewerApp {
     return button;
   }
 
-  setSearchResultsOpen(results, isOpen, uiState) {
-    const nextIsOpen = Boolean(isOpen);
-
-    if (uiState.closeTimer) {
-      window.clearTimeout(uiState.closeTimer);
-      uiState.closeTimer = 0;
-    }
-
-    this.cancelSearchResultsResizeAnimation(uiState);
-
-    if (nextIsOpen) {
-      results.hidden = false;
-      results.classList.remove("closing");
-      window.requestAnimationFrame(() => {
-        if (results.hidden) {
-          return;
-        }
-        results.classList.add("open");
-      });
-      return;
-    }
-
-    results.classList.remove("open");
-    if (results.hidden) {
-      results.style.height = "";
-      results.replaceChildren();
-      results.classList.remove("closing");
-      return;
-    }
-
-    results.classList.add("closing");
-    uiState.closeTimer = window.setTimeout(() => {
-      results.hidden = true;
-      results.style.height = "";
-      results.classList.remove("closing");
-      results.replaceChildren();
-      uiState.closeTimer = 0;
-    }, SEARCH_RESULTS_TRANSITION_MS);
-  }
-
-  animateSearchResultsResize(results, uiState, previousHeight, shouldAnimate) {
-    this.cancelSearchResultsResizeAnimation(uiState);
-
-    if (!shouldAnimate || results.hidden || !results.classList.contains("open")) {
-      results.style.height = "";
-      return;
-    }
-
-    const nextHeight = results.getBoundingClientRect().height;
-    if (!previousHeight || Math.abs(nextHeight - previousHeight) < 1) {
-      results.style.height = "";
-      return;
-    }
-
-    results.style.height = `${previousHeight}px`;
-    void results.offsetHeight;
-
-    uiState.resizeFrame = window.requestAnimationFrame(() => {
-      uiState.resizeFrame = 0;
-      results.style.height = `${nextHeight}px`;
-      uiState.resizeTimer = window.setTimeout(() => {
-        uiState.resizeTimer = 0;
-        if (!results.hidden && results.classList.contains("open")) {
-          results.style.height = "";
-        }
-      }, SEARCH_RESULTS_TRANSITION_MS);
-    });
-  }
-
-  cancelSearchResultsResizeAnimation(uiState) {
-    if (uiState.resizeFrame) {
-      window.cancelAnimationFrame(uiState.resizeFrame);
-      uiState.resizeFrame = 0;
-    }
-
-    if (uiState.resizeTimer) {
-      window.clearTimeout(uiState.resizeTimer);
-      uiState.resizeTimer = 0;
-    }
-  }
-
   syncSearchActiveResult(resultsEl = this.elements.searchResults, activeIndex = this.searchActiveIndex) {
     const buttons = resultsEl.querySelectorAll(".search-result");
     buttons.forEach((button, index) => {
@@ -2161,10 +1697,71 @@ export class ViewerApp {
   selectSearchResult(entry) {
     this.elements.searchInput.value = entry.username;
     this.hideSearchResults();
-    if (this.isMobileLayout) {
-      this.setMobileSearchOpen(false);
-    }
     this.renderer.focusCell(entry.cell, { animate: true, resetZoom: true });
+  }
+
+  handleGlobalPointerDown(event) {
+    if (!(event.target instanceof Node)) {
+      return;
+    }
+
+    if (
+      this.filterMenuOpen &&
+      !this.elements.filterMenu.contains(event.target) &&
+      !this.elements.filterToggleButton.contains(event.target)
+    ) {
+      this.setFilterMenuOpen(false);
+    }
+
+    if (
+      !this.elements.searchPanel.hidden &&
+      !this.elements.searchPanel.contains(event.target) &&
+      !this.elements.searchToggleButton.contains(event.target) &&
+      !this.elements.searchResults.contains(event.target)
+    ) {
+      this.setSearchPanelOpen(false);
+    }
+
+    const { sessionPopover, sessionTriggerButton } = this.elements;
+    if (
+      !sessionPopover.hidden &&
+      !sessionPopover.contains(event.target) &&
+      !sessionTriggerButton.contains(event.target)
+    ) {
+      this.closeSessionPopover();
+    }
+  }
+
+  handleGlobalKeyDown(event) {
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    let didHandle = false;
+
+    if (this.filterMenuOpen) {
+      this.setFilterMenuOpen(false);
+      didHandle = true;
+    }
+
+    if (!this.elements.searchPanel.hidden) {
+      this.setSearchPanelOpen(false);
+      didHandle = true;
+    }
+
+    if (!this.elements.sessionPopover.hidden) {
+      this.closeSessionPopover();
+      didHandle = true;
+    }
+
+    if (!this.elements.worldsModal.hidden) {
+      this.closeWorldsModal();
+      didHandle = true;
+    }
+
+    if (didHandle) {
+      event.preventDefault();
+    }
   }
 
   // innerHTML rather than textContent so WRONG_MAP_VERSION_MESSAGE's link can
@@ -2178,14 +1775,13 @@ export class ViewerApp {
   setPendingSessionState() {
     this.elements.logoutButton.hidden = true;
     this.elements.loginForm.hidden = false;
-    this.elements.sessionPanel.classList.remove("signed-in");
+    this.elements.sessionPopover.classList.remove("signed-in");
     this.elements.loginButton.disabled = false;
     this.elements.sessionName.textContent = "Loading...";
-    this.setSidebarToggleVisible(false);
+    this.elements.sessionTriggerLabel.textContent = "Loading...";
     this.setSearchEnabled(false, "Loading world map access...");
     this.setFilterEnabled(false);
     this.updateRefreshButtonState();
-    this.setMobileSidebarOpen(false);
     this.selectedCell = null;
     this.hoveredCell = null;
     this.renderer?.reset(INITIAL_OVERLAY_MESSAGE);
@@ -2198,10 +1794,10 @@ export class ViewerApp {
   } = {}) {
     this.elements.logoutButton.hidden = true;
     this.elements.loginForm.hidden = false;
-    this.elements.sessionPanel.classList.remove("signed-in");
+    this.elements.sessionPopover.classList.remove("signed-in");
     this.elements.loginButton.disabled = false;
     this.elements.sessionName.textContent = "Signed out";
-    this.setSidebarToggleVisible(false);
+    this.elements.sessionTriggerLabel.textContent = "Sign in";
     this.setSessionStatus(sessionStatus, isError);
     this.setSearchEnabled(false, "Sign in to search the loaded world map.");
     this.setFilterEnabled(false);
@@ -2209,7 +1805,6 @@ export class ViewerApp {
     this.selectedCell = null;
     this.hoveredCell = null;
     this.renderer?.reset(SIGNED_OUT_OVERLAY_MESSAGE);
-    this.setMobileSidebarOpen(true);
     this.renderDetails();
   }
 }
