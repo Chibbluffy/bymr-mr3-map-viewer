@@ -1,14 +1,11 @@
 import {
-  FETCH_TIMEOUT_SHORT_MS,
   FETCH_TIMEOUT_LONG_MS,
   MR3,
   buildBymUrl,
   buildSessionPayload,
-  extractErrorMessage,
   fetchJson,
   getViewerConfig,
   normalizeApiVersion,
-  parseJsonPayload,
 } from "./shared.js";
 
 export class ApiClient {
@@ -22,52 +19,15 @@ export class ApiClient {
     return this.config;
   }
 
+  /** Current game API version from the CDN's version manifest — the same source the launcher and server use. */
   async resolveApiVersion() {
-    const probeVersion = "__viewer_probe__";
-    const probeUrl = buildBymUrl(`/api/${probeVersion}/player/getinfo`, null, this.config);
-
     try {
-      await fetchJson(probeUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-        },
-        body: new URLSearchParams({
-          sessionType: "game",
-        }),
-      });
-    } catch (error) {
-      const fromProbe = this.extractApiVersion(error?.message || "");
-      if (fromProbe) {
-        return fromProbe;
-      }
-    }
-
-    // Raw fetch() rather than fetchJson() — this probe deliberately inspects the
-    // response body even on a non-2xx status, which fetchJson() doesn't support.
-    // Still needs its own timeout: this runs on every app start/server switch,
-    // before login, so a stalled connection here would hang the app before the
-    // user even sees the login screen.
-    const controller = new AbortController();
-    const timeoutId = globalThis.setTimeout(() => controller.abort(), FETCH_TIMEOUT_SHORT_MS);
-    try {
-      const response = await fetch(buildBymUrl("/init", null, this.config), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-        },
-        body: JSON.stringify({}),
-        signal: controller.signal,
-      });
-      const payload = parseJsonPayload(await response.text());
-      const fromInit = this.extractApiVersion(extractErrorMessage(payload) || "");
-      if (fromInit) {
-        return fromInit;
+      const manifest = await fetchJson(`${this.config.cdnBaseUrl}/versionManifest.json`);
+      if (manifest?.currentGameVersion) {
+        return `v${manifest.currentGameVersion}-beta`;
       }
     } catch (error) {
       void error;
-    } finally {
-      globalThis.clearTimeout(timeoutId);
     }
 
     return normalizeApiVersion(this.config.apiVersion);
@@ -213,10 +173,5 @@ export class ApiClient {
     } finally {
       releaseGate();
     }
-  }
-
-  extractApiVersion(message) {
-    const match = String(message || "").match(/Expected(?:\s+one\s+of)?:\s*([^,\s]+)/i);
-    return match ? normalizeApiVersion(match[1]) : null;
   }
 }
